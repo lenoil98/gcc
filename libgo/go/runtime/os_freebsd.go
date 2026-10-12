@@ -13,22 +13,29 @@ type mOS struct{}
 
 //go:noescape
 //extern _umtx_op
-func sys_umtx_op(addr *uint32, mode int32, val uint32, uaddr1 uinptr, ts *umtx_time) int32
+func sys_umtx_op(addr *uint32, mode int32, val uint32, uaddr1 uintptr, ts unsafe.Pointer) int32
+
+// Profiler and runtime helper stubs required by os_gccgo.go, proc.go, and signal_unix.go
+func setThreadCPUProfiler(hz int32) {
+	setThreadCPUProfilerHz(hz)
+}
+func setProcessCPUProfiler(hz int32) {
+	setProcessCPUProfilerTimer(hz)
+}
+//go:nosplit
+func validSIGPROF(mp *m, c *sigctxt) bool {
+	return true
+}
+func getProcID() uint64 { return 0 }
 
 //go:noescape
 //extern sysctl
 func sysctl(*uint32, uint32, *byte, *uintptr, *byte, uintptr) int32
 
 const (
-	_CTL_MAXNAME     = 24
-	_CPU_LEVEL_WHICH = 3
-	_CPU_WHICH_PID   = 2
-)
-
-// From FreeBSD's <sys/sysctl.h>
-const (
-	_CTL_HW      = 6
-	_HW_PAGESIZE = 7
+	// _UMTX_OP constants defined as fallbacks if omitted from sysinfo
+	_UMTX_OP_WAIT_UINT_PRIVATE = 15
+	_UMTX_OP_WAKE_PRIVATE      = 16
 )
 
 // Undocumented numbers from FreeBSD's lib/libc/gen/sysctlnametomib.c.
@@ -88,9 +95,9 @@ func getncpu() int32 {
 		return 1
 	}
 
-	maskSize := int(maxcpus+7) / 8
-	if maskSize < goarch.PtrSize {
-		maskSize = goarch.PtrSize
+	maskSize := uintptr(maxcpus+7) / 8
+	if maskSize < uintptr(goarch.PtrSize) {
+		maskSize = uintptr(goarch.PtrSize)
 	}
 	if maskSize > uintptr(len(mask)) {
 		maskSize = uintptr(len(mask))
@@ -136,18 +143,24 @@ func futexsleep(addr *uint32, val uint32, ns int64) {
 }
 
 func futexsleep1(addr *uint32, val uint32, ns int64) {
-	var utp *umtx_time
+	// _umtx_op is the libc wrapper: it returns -1 and sets errno.
+	// A struct timespec (size <= sizeof(timespec)) is accepted as a
+	// relative timeout, which avoids the _umtx_time alignment issue.
+	var ts timespec
+	var tsp unsafe.Pointer
 	if ns >= 0 {
-		var ut umtx_time
-		ut._clockid = _CLOCK_MONOTONIC
-		ut._timeout.setNsec(ns)
-		utp = &ut
+		ts.tv_sec = timespec_sec_t(ns / 1000000000)
+		ts.tv_nsec = timespec_nsec_t(ns % 1000000000)
+		tsp = unsafe.Pointer(&ts)
 	}
-	ret := sys_umtx_op(addr, _UMTX_OP_WAIT_UINT_PRIVATE, val, unsafe.Sizeof(*utp), utp)
-	if ret >= 0 || ret == -_EINTR || ret == -_ETIMEDOUT {
+	ret := sys_umtx_op(addr, _UMTX_OP_WAIT_UINT_PRIVATE, val, unsafe.Sizeof(ts), tsp)
+	if ret >= 0 {
 		return
 	}
-	print("umtx_wait addr=", addr, " val=", val, " ret=", ret, "\n")
+	if e := errno(); e == _EINTR || e == _ETIMEDOUT {
+		return
+	}
+	print("umtx_wait addr=", addr, " val=", val, " ret=", ret, " errno=", errno(), "\n")
 	*(*int32)(unsafe.Pointer(uintptr(0x1005))) = 0x1005
 }
 
@@ -201,10 +214,6 @@ func sysauxv(auxv []uintptr) {
 		// _AT_NCPUS from auxv shouldn't be used due to golang.org/issue/15206
 		case _AT_PAGESZ:
 			physPageSize = val
-		case _AT_TIMEKEEP:
-			timekeepSharedPage = (*vdsoTimekeep)(unsafe.Pointer(val))
 		}
-
-		archauxv(tag, val)
 	}
 }

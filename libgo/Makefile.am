@@ -945,6 +945,8 @@ CHECK = \
 	LD_LIBRARY_PATH="`${PWD_COMMAND}`/.libs:$${libgccdir}:${LD_LIBRARY_PATH}"; \
 	LD_LIBRARY_PATH=`echo $${LD_LIBRARY_PATH} | sed 's,::*,:,g;s,^:*,,;s,:*$$,,'`; \
 	export LD_LIBRARY_PATH; \
+	LD_32_LIBRARY_PATH="$${LD_LIBRARY_PATH}"; \
+	export LD_32_LIBRARY_PATH; \
 	$(MKDIR_P) $(@D); \
 	rm -f $@-testsum $@-testlog; \
 	files=`$(SHELL) $(srcdir)/match.sh --goarch=$(GOARCH) --goos=$(GOOS) --srcdir=$(srcdir)/go/$(@D) --extrafiles="$(extra_go_files_$(subst .,_,$(subst /,_,$(@D))))" $(matchargs_$(subst /,_,$(@D)))`; \

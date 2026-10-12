@@ -512,6 +512,11 @@ if test "${GOOS}" = "netbsd"; then
     st_times='-e s/st_atim/Atimespec/ -e s/st_mtim/Mtimespec/ -e s/st_ctim/Ctimespec/'
 fi
 
+# FreeBSD: libgo's os, archive/tar etc. expect the *timespec names.
+if test "${GOOS}" = "freebsd"; then
+    st_times='-e s/st_atim\([^_]\)/Atimespec\1/ -e s/st_mtim\([^_]\)/Mtimespec\1/ -e s/st_ctim\([^_]\)/Ctimespec\1/ -e s/st_birthtim\([^_]\)/Birthtimespec\1/'
+fi
+
 # The stat type.
 # Prefer largefile variant if available.
 stat=`grep '^type _stat64 ' gen-sysinfo.go || true`
@@ -1089,6 +1094,7 @@ fi
 grep '^type _if_msghdr ' gen-sysinfo.go | \
     sed -e "s/_if_msghdr/${ifmsghdr_name}/" \
 		-e 's/ifm_msglen/Msglen/' \
+		-e 's/ifm_data _if_data/Data IfData/' \
 		-e 's/ifm_version/Version/' \
 		-e 's/ifm_type/Type/' \
 		-e 's/ifm_addrs/Addrs/' \
@@ -1096,6 +1102,39 @@ grep '^type _if_msghdr ' gen-sysinfo.go | \
 		-e 's/ifm_index/Index/' \
 		-e 's/ifm_addrlen/Addrlen/' \
 		>> ${OUT}
+
+# The if_data struct (FreeBSD).
+grep '^type _if_data ' gen-sysinfo.go | \
+    sed -e 's/_if_data/IfData/g' \
+	-e 's/ifi_type/Type/' \
+	-e 's/ifi_physical/Physical/' \
+	-e 's/ifi_addrlen/Addrlen/' \
+	-e 's/ifi_hdrlen/Hdrlen/' \
+	-e 's/ifi_link_state/link_State/' \
+	-e 's/ifi_vhid/Vhid/' \
+	-e 's/ifi_datalen/Datalen/' \
+	-e 's/ifi_mtu/Mtu/' \
+	-e 's/ifi_metric/Metric/' \
+	-e 's/ifi_baudrate/Baudrate/' \
+	-e 's/ifi_ipackets/Ipackets/' \
+	-e 's/ifi_ierrors/Ierrors/' \
+	-e 's/ifi_opackets/Opackets/' \
+	-e 's/ifi_oerrors/Oerrors/' \
+	-e 's/ifi_collisions/Collisions/' \
+	-e 's/ifi_ibytes/Ibytes/' \
+	-e 's/ifi_obytes/Obytes/' \
+	-e 's/ifi_imcasts/Imcasts/' \
+	-e 's/ifi_omcasts/Omcasts/' \
+	-e 's/ifi_iqdrops/Iqdrops/' \
+	-e 's/ifi_oqdrops/Oqdrops/' \
+	-e 's/ifi_noproto/Noproto/' \
+	-e 's/ifi_hwassist/Hwassist/' \
+	-e 's/__ifi_epoch/Epoch/' \
+	-e 's/__ifi_lastchange/Lastchange/' \
+	-e 's/ifi_lastchange/Lastchange/' \
+	-e 's/_timeval/Timeval/' \
+	-e 's/_timespec/Timespec/' \
+      >> ${OUT}
 
 # The if_announcemsghdr struct.
 grep '^type _if_announcemsghdr ' gen-sysinfo.go | \
@@ -1106,6 +1145,17 @@ grep '^type _if_announcemsghdr ' gen-sysinfo.go | \
         -e 's/ifan_index/Index/' \
         -e 's/ifan_name/Name/' \
         -e 's/ifan_what/What/' \
+      >> ${OUT}
+
+# The ifma_msghdr struct.
+grep '^type _ifma_msghdr ' gen-sysinfo.go | \
+    sed -e 's/_ifma_msghdr/IfmaMsghdr/g' \
+        -e 's/ifmam_msglen/Msglen/' \
+        -e 's/ifmam_version/Version/' \
+        -e 's/ifmam_type/Type/' \
+        -e 's/ifmam_addrs/Addrs/' \
+        -e 's/ifmam_flags/Flags/' \
+        -e 's/ifmam_index/Index/' \
       >> ${OUT}
 
 # The interface information types and flags.
@@ -1480,13 +1530,14 @@ fi
 
 # Struct sizes.
 set cmsghdr Cmsghdr ip_mreq IPMreq ip_mreqn IPMreqn ipv6_mreq IPv6Mreq \
-    ifaddrmsg IfAddrmsg ifa_msghdr IfaMsghdr ifinfomsg IfInfomsg \
+    ifaddrmsg IfAddrmsg ifa_msghdr IfaMsghdr ifma_msghdr IfmaMsghdr ifinfomsg IfInfomsg \
     if_msghdr IfMsghdr in_pktinfo Inet4Pktinfo in6_pktinfo Inet6Pktinfo \
     inotify_event InotifyEvent linger Linger msghdr Msghdr nlattr NlAttr \
     nlmsgerr NlMsgerr nlmsghdr NlMsghdr rtattr RtAttr rt_msghdr RtMsghdr \
     rtgenmsg RtGenmsg rtmsg RtMsg rtnexthop RtNexthop \
     sock_filter SockFilter sock_fprog SockFprog ucred Ucred \
-    icmp6_filter ICMPv6Filter ip6_mtuinfo IPv6MTUInfo
+    icmp6_filter ICMPv6Filter ip6_mtuinfo IPv6MTUInfo \
+    rt_metrics RtMetrics if_data IfData
 while test $# != 0; do
     nc=$1
     ngo=$2
@@ -1510,6 +1561,15 @@ if ! grep 'const SizeofIPMreqn ' ${OUT} >/dev/null 2>&1; then
 fi
 if ! grep 'const SizeofICMPv6Filter ' ${OUT} >/dev/null 2>&1; then
     echo 'const SizeofICMPv6Filter = 32' >> ${OUT}
+fi
+if test "${GOOS}" = "freebsd"; then
+  if ! grep 'const SizeofRtMetrics ' ${OUT} >/dev/null 2>&1; then
+    echo 'const SizeofRtMetrics = 112' >> ${OUT}
+  fi
+  # AI_MASK is a multi-line macro that -fdump-go-spec does not emit.
+  if ! grep '^const AI_MASK ' ${OUT} >/dev/null 2>&1; then
+    echo 'const AI_MASK = AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG | AI_ALL | AI_V4MAPPED' >> ${OUT}
+  fi
 fi
 
 # Type 'uint128' is needed in a couple of type definitions on arm64,such

@@ -4274,6 +4274,13 @@ func sigprof(pc uintptr, gp *g, mp *m) {
 				break
 			}
 		}
+		// On FreeBSD libthr adds unnamed wrapper frames between
+		// runtime.sigtramp and the kernel trampoline; discard those too.
+		if GOOS == "freebsd" {
+			for framesToDiscard > 0 && framesToDiscard < n && stklocs[framesToDiscard].function == "" {
+				framesToDiscard++
+			}
+		}
 		n -= framesToDiscard
 		for i := 0; i < n; i++ {
 			stk[i] = stklocs[i+framesToDiscard].pc

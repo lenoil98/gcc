@@ -32,6 +32,23 @@
 #endif
 #endif
 
+#ifdef __powerpc64__
+/* Return nonzero if PC is a plausible code address, i.e. it is
+   aligned and covered by unwind information.  A frame interrupted
+   asynchronously (e.g. by SIGPROF) in an epilogue that its CFI does
+   not describe -- as in clang-built base system libraries -- can
+   yield a garbage LR, which must not be dereferenced.  */
+
+static int
+ppc64_freebsd_code_p (const unsigned int *pc)
+{
+  struct dwarf_eh_bases bases;
+
+  return ((unsigned long) pc & 3) == 0
+	 && _Unwind_Find_FDE ((void *) pc, &bases) != NULL;
+}
+#endif
+
 #define MD_FROB_UPDATE_CONTEXT frob_update_context
 
 static void
@@ -63,7 +80,8 @@ frob_update_context (struct _Unwind_Context *context,
 	{
 	  unsigned int *insn
 	    = (unsigned int *) _Unwind_GetGR (context, R_LR);
-	  if (insn && *insn == 0xE8410000 + TOC_SAVE_SLOT)
+	  if (insn && ppc64_freebsd_code_p (insn)
+	      && *insn == 0xE8410000 + TOC_SAVE_SLOT)
 	    _Unwind_SetGRPtr (context, 2, context->cfa + TOC_SAVE_SLOT);
 #if _CALL_ELF != 2
 	  /* ELFv2 does not use this function pointer call sequence.  */
@@ -82,3 +100,146 @@ frob_update_context (struct _Unwind_Context *context,
     }
 #endif
 }
+
+#ifdef __powerpc64__
+/* Unwinding through the signal trampoline.
+
+   FreeBSD maps the signal trampoline (sigcode64 / sigcode64_elfv2 in
+   sys/powerpc/powerpc/sigcode64.S) into a shared page and reports its
+   bounds through the kern.proc.sigtramp sysctl, as on amd64 and aarch64.
+   The trampoline does "addi r1,r1,-112" and then calls the handler,
+   so the struct sigframe, whose first member is the ucontext_t, sits
+   112 bytes above the trampoline's stack pointer, which is the CFA of
+   the handler frame.
+
+   All GPRs except r1 are described, because an asynchronous signal
+   (e.g. SIGPROF) can interrupt code whose CFA is computed from a
+   volatile register, such as r12 in a large-frame prologue.  FPRs
+   and VRs: only the callee-saved ones (f14-f31, v20-v31, VRSAVE).  */
+
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+
+#define PPC64_FREEBSD_SIGTRAMP_FRAME	112
+
+#define R_CR2		70
+#define R_CR3		71
+#define R_CR4		72
+#define R_VR0		77
+#define R_VRSAVE	109
+
+/* EH column of the (otherwise unused) argument pointer, used to hold
+   the interrupted PC.  ARG_POINTER_REGNUM is GCC's internal register
+   number (99), which is not the same as its DWARF EH column.
+   See rs6000_debugger_regno (..., 2).  */
+#define R_AP		67
+
+static int
+ppc64_freebsd_outside_sigtramp_range (unsigned char *pc)
+{
+  static int sigtramp_range_determined = 0;
+  static unsigned char *sigtramp_start, *sigtramp_end;
+
+  if (sigtramp_range_determined == 0)
+    {
+      struct kinfo_sigtramp kst = {0};
+      size_t len = sizeof (kst);
+      int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_SIGTRAMP, getpid () };
+
+      sigtramp_range_determined = 1;
+      if (sysctl (mib, 4, &kst, &len, NULL, 0) == 0)
+	{
+	  sigtramp_range_determined = 2;
+	  sigtramp_start = kst.ksigtramp_start;
+	  sigtramp_end   = kst.ksigtramp_end;
+	}
+    }
+  if (sigtramp_range_determined < 2)	/* sysctl failed if < 2 */
+    return 1;
+
+  return (pc < sigtramp_start || pc >= sigtramp_end);
+}
+
+#define MD_FALLBACK_FRAME_STATE_FOR ppc64_freebsd_fallback_frame_state
+
+static _Unwind_Reason_Code
+ppc64_freebsd_fallback_frame_state (struct _Unwind_Context *context,
+				    _Unwind_FrameState *fs)
+{
+  ucontext_t *uc;
+  mcontext_t *mc;
+  long new_cfa, cr_offset;
+  int i;
+
+  if (ppc64_freebsd_outside_sigtramp_range (context->ra))
+    return _URC_END_OF_STACK;
+
+  uc = (ucontext_t *) ((char *) context->cfa + PPC64_FREEBSD_SIGTRAMP_FRAME);
+  mc = &uc->uc_mcontext;
+
+  /* Refuse to guess if this does not look like a machine context.  */
+  if (mc->mc_vers != _MC_VERSION || mc->mc_len != (int) sizeof (*mc))
+    return _URC_END_OF_STACK;
+
+  new_cfa = mc->mc_gpr[__LIBGCC_STACK_POINTER_REGNUM__];
+  fs->regs.cfa_how = CFA_REG_OFFSET;
+  fs->regs.cfa_reg = __LIBGCC_STACK_POINTER_REGNUM__;
+  fs->regs.cfa_offset = new_cfa - (long) context->cfa;
+
+  for (i = 0; i < 32; i++)
+    {
+      if (i == 1)
+	continue;
+      fs->regs.how[i] = REG_SAVED_OFFSET;
+      fs->regs.reg[i].loc.offset = (long) &mc->mc_gpr[i] - new_cfa;
+    }
+
+  /* CR is 32 bits, stored in a 64-bit slot.  In the ELFv1 ABI, CR2
+     stands in for the whole CR; in ELFv2 each field has its own entry.  */
+  cr_offset = (long) &mc->mc_cr - new_cfa;
+#ifndef __LITTLE_ENDIAN__
+  cr_offset += sizeof (long) - 4;
+#endif
+  fs->regs.how[R_CR2] = REG_SAVED_OFFSET;
+  fs->regs.reg[R_CR2].loc.offset = cr_offset;
+#if _CALL_ELF == 2
+  fs->regs.how[R_CR3] = REG_SAVED_OFFSET;
+  fs->regs.reg[R_CR3].loc.offset = cr_offset;
+  fs->regs.how[R_CR4] = REG_SAVED_OFFSET;
+  fs->regs.reg[R_CR4].loc.offset = cr_offset;
+#endif
+
+  fs->regs.how[R_LR] = REG_SAVED_OFFSET;
+  fs->regs.reg[R_LR].loc.offset = (long) &mc->mc_lr - new_cfa;
+
+  /* The interrupted PC (SRR0) is the return address of this frame.  */
+  fs->regs.how[R_AP] = REG_SAVED_OFFSET;
+  fs->regs.reg[R_AP].loc.offset = (long) &mc->mc_srr0 - new_cfa;
+  fs->retaddr_column = R_AP;
+  fs->signal_frame = 1;
+
+  if (mc->mc_flags & _MC_FP_VALID)
+    for (i = 14; i < 32; i++)
+      {
+	fs->regs.how[i + 32] = REG_SAVED_OFFSET;
+	fs->regs.reg[i + 32].loc.offset = (long) &mc->mc_fpreg[i] - new_cfa;
+      }
+
+  if (mc->mc_flags & _MC_AV_VALID)
+    {
+      for (i = 20; i < 32; i++)
+	{
+	  fs->regs.how[i + R_VR0] = REG_SAVED_OFFSET;
+	  fs->regs.reg[i + R_VR0].loc.offset
+	    = (long) &mc->mc_avec[2 * i] - new_cfa;
+	}
+      fs->regs.how[R_VRSAVE] = REG_SAVED_OFFSET;
+      fs->regs.reg[R_VRSAVE].loc.offset = (long) &mc->mc_vrsave - new_cfa;
+    }
+
+  return _URC_NO_REASON;
+}
+#endif /* __powerpc64__ */

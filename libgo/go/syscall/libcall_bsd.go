@@ -16,11 +16,12 @@ import (
 //sys	sysctl(mib []_C_int, old *byte, oldlen *uintptr, new *byte, newlen uintptr) (err error)
 //sysctl(mib *_C_int, miblen uintptr, old *byte, oldlen *uintptr, new *byte, newlen uintptr) _C_int
 
+// Exported so that golang.org/x/net/route can reach it via go:linkname.
+//go:linkname sysctl syscall.sysctl
+
 //sysnb raw_ptrace(request int, pid int, addr uintptr, data uintptr) (err Errno)
 //ptrace(request _C_int, pid Pid_t, addr *byte, data _C_int) _C_int
 
-//sys	paccept(fd int, rsa *RawSockaddrAny, addrlen *Socklen_t, sigmask *_sigset_t, flags int) (nfd int, err error)
-//paccept(s _C_int, rsa *RawSockaddrAny, addrlen *Socklen_t, sigmask *_sigset_t, flags int) _C_int
 
 //sys	Flock(fd int, how int) (err error)
 //flock(fd _C_int, how _C_int) _C_int
@@ -37,7 +38,7 @@ func ReadDirent(fd int, buf []byte) (n int, err error) {
 func Accept4(fd, flags int) (nfd int, sa Sockaddr, err error) {
 	var rsa RawSockaddrAny
 	var len Socklen_t = SizeofSockaddrAny
-	nfd, err = paccept(fd, &rsa, &len, nil, flags)
+	nfd, err = bsdAccept4(fd, &rsa, &len, flags)
 	if err != nil {
 		return
 	}

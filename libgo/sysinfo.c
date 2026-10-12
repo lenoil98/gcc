@@ -134,6 +134,11 @@
 #if defined(HAVE_NET_ROUTE_H)
 #include <net/route.h>
 #endif
+#if defined(__FreeBSD__)
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/route.h>
+#endif
 #if defined (HAVE_NETPACKET_PACKET_H)
 #include <netpacket/packet.h>
 #endif

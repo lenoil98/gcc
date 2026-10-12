@@ -107,7 +107,7 @@ func getsig(i uint32) uintptr {
 		// On GNU/Linux glibc rejects attempts to call
 		// sigaction with signal 32 (SIGCANCEL) or 33 (SIGSETXID).
 		// On musl signal 34 (SIGSYNCCALL) also needs to be treated accordingly.
-		if GOOS == "linux" && (i == 32 || i == 33 || i == 34) {
+		if (GOOS == "linux" && (i == 32 || i == 33 || i == 34)) || (GOOS == "freebsd" && i == 32) {
 			return _SIG_DFL
 		}
 		throw("sigaction read failure")

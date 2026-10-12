@@ -254,6 +254,8 @@ getSiginfo(siginfo_t *info, void *context __attribute__((unused)))
 	ret.sigpc = ((ucontext_t*)(context))->uc_mcontext.sc_pc;
 #elif defined(__PPC64__) && defined(__linux__)
 	ret.sigpc = ((ucontext_t*)(context))->uc_mcontext.gp_regs[32];
+#elif defined(__PPC64__) && defined(__FreeBSD__)
+	ret.sigpc = ((ucontext_t*)(context))->uc_mcontext.mc_srr0;
 #elif defined(__PPC__) && defined(__linux__)
 # if defined(__GLIBC__)
 	ret.sigpc = ((ucontext_t*)(context))->uc_mcontext.uc_regs->gregs[32];

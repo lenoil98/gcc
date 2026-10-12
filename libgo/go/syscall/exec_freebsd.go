@@ -5,7 +5,6 @@
 package syscall
 
 import (
-	"runtime"
 	"unsafe"
 )
 
@@ -38,8 +37,6 @@ type SysProcAttr struct {
 }
 
 const (
-	_P_PID = 0
-
 	_PROC_PDEATHSIG_CTL = 11
 )
 
@@ -134,7 +131,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		}
 
 		// Place process group in foreground.
-		err1 = raw_ioctl(sys.Ctty, TIOCSPGRP, unsafe.Pointner(&pgrp))
+		_, err1 = raw_ioctl(sys.Ctty, TIOCSPGRP, int(uintptr(unsafe.Pointer(&pgrp))))
 		if err1 != 0 {
 			goto childerror
 		}
@@ -165,7 +162,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		}
 
 		if !cred.NoSetGroups {
-			err1 = raw_setgroups(ngroups, groups)
+			err1 = raw_setgroups(ngroups, unsafe.Pointer(groups))
 			if err1 != 0 {
 				goto childerror
 			}
@@ -227,7 +224,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 			if nextfd == pipe { // don't stomp on pipe
 				nextfd++
 			}
-			err1 = raw_fcntl(fd[i], _F_DUP2FD_CLOEXEC, nextfd)
+			_, err1 = raw_fcntl(fd[i], _F_DUP2FD_CLOEXEC, nextfd)
 			if err1 != 0 {
 				goto childerror
 			}
@@ -277,7 +274,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 
 	// Set the controlling TTY to Ctty
 	if sys.Setctty {
-		_, err1 = raw_ioctl(sys.Cty, TIOCSCTTY, 0)
+		_, err1 = raw_ioctl(sys.Ctty, TIOCSCTTY, 0)
 		if err1 != 0 {
 			goto childerror
 		}

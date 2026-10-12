@@ -2,12 +2,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build freebsd
+// +build freebsd
+
 package route
 
 import (
 	"syscall"
 	"unsafe"
 )
+
+//sys	Getdirentries(fd int, buf []byte, basep *uintptr) (n int, err error)
+//sys	nametomib(name string) (mib []int, err error)
 
 func (typ RIBType) parseable() bool { return true }
 

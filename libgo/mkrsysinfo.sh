@@ -179,3 +179,10 @@ grep '^type _kevent ' gen-sysinfo.go | \
 if ! grep '^type uint128' ${OUT} > /dev/null 2>&1; then
     echo "type uint128 [16]byte" >> ${OUT}
 fi
+
+# FreeBSD: <signal.h> defines NSIG as 32, but SIGTHR is signal 32 and
+# mksigtab.sh includes it in sigtable.  Use 33, as the gc runtime does.
+if test "${GOOS}" = "freebsd"; then
+  sed -e 's/^const _NSIG = 32$/const _NSIG = 33/' ${OUT} > ${OUT}.tmp
+  mv -f ${OUT}.tmp ${OUT}
+fi

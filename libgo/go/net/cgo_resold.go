@@ -22,7 +22,7 @@ func libc_getnameinfo(*syscall.RawSockaddr, syscall.Socklen_t, *byte, syscall.Si
 
 func cgoNameinfoPTR(b []byte, sa *syscall.RawSockaddr, salen syscall.Socklen_t) (int, error) {
 	syscall.Entersyscall()
-	gerrno := libc_getnameinfo(sa, salen, &b[0], syscall.Size(len(b)), nil, 0, syscall.NI_NAMEREQD)
+	gerrno := libc_getnameinfo(sa, salen, &b[0], syscall.Size_t(len(b)), nil, 0, syscall.NI_NAMEREQD)
 	syscall.Exitsyscall()
 	var err error
 	if gerrno == syscall.EAI_SYSTEM {

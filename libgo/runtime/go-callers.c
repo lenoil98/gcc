@@ -80,6 +80,28 @@ runtime_skipInCallback(const char *function, struct callers_data *arg)
   return false;
 }
 
+#ifdef __FreeBSD__
+/* Helpers to ask the symbol table for a name, used below to tell
+   libthr's unnamed signal wrapper frames apart from user code that
+   merely lacks debug info.  */
+
+static void
+freebsd_syminfo_cb (void *data, uintptr_t pc __attribute__ ((unused)),
+		    const char *symname,
+		    uintptr_t address __attribute__ ((unused)),
+		    uintptr_t size __attribute__ ((unused)))
+{
+  *(const char **) data = symname;
+}
+
+static void
+freebsd_syminfo_error (void *data __attribute__ ((unused)),
+		       const char *msg __attribute__ ((unused)),
+		       int errnum __attribute__ ((unused)))
+{
+}
+#endif
+
 /* Callback function for backtrace_full.  Just collect the locations.
    Return zero to continue, non-zero to stop.  */
 
@@ -94,9 +116,27 @@ callback (void *data, uintptr_t pc, const char *filename, int lineno,
      handler function.  */
   if (arg->saw_sigtramp)
     {
+#ifdef __FreeBSD__
+      /* On FreeBSD libthr wraps signal handlers, so there can be
+	 several unnamed frames (libthr's handler and the kernel
+	 signal trampoline) above sigtramp.  Skip those that have no
+	 name even in the symbol table; keep user code (e.g. C compiled
+	 without -g), which backtrace_syminfo can still name.  */
+      if (function == NULL)
+	{
+	  const char *sym = NULL;
+
+	  backtrace_syminfo (__go_get_backtrace_state (), pc,
+			     freebsd_syminfo_cb, freebsd_syminfo_error, &sym);
+	  if (sym == NULL)
+	    return 0;
+	}
+      arg->saw_sigtramp = 0;
+#else
       arg->saw_sigtramp = 0;
       if (function == NULL)
 	return 0;
+#endif
     }
 
   /* Skip split stack functions.  */
@@ -125,6 +165,28 @@ callback (void *data, uintptr_t pc, const char *filename, int lineno,
       && !arg->keep_thunks
       && runtime_skipInCallback (function, arg))
     return 0;
+
+  /* Stop at the goroutine entry even while skipping frames.  On
+     systems whose makecontext does not terminate the unwind
+     information (FreeBSD), the walk would otherwise never end.
+     The frames below these are never meaningful.  */
+  if (arg->skip > 0 && function != NULL
+      && (__builtin_strcmp (function, "runtime.kickoff") == 0
+	  || __builtin_strcmp (function, "runtime.main") == 0
+	  || __builtin_strcmp (function, "runtime_mstart") == 0
+	  || __builtin_strcmp (function, "makecontext") == 0))
+    return 1;
+
+  /* Stop at the goroutine entry even while skipping frames.  On
+     systems whose makecontext does not terminate the unwind
+     information (FreeBSD), the walk would otherwise never end.
+     The frames below these are never meaningful.  */
+  if (arg->skip > 0 && function != NULL
+      && (__builtin_strcmp (function, "runtime.kickoff") == 0
+	  || __builtin_strcmp (function, "runtime.main") == 0
+	  || __builtin_strcmp (function, "runtime_mstart") == 0
+	  || __builtin_strcmp (function, "makecontext") == 0))
+    return 1;
 
   if (arg->skip > 0)
     {

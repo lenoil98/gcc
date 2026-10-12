@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// gccgo does not implement the FreeBSD 11 dirent conversion.
+
+//go:build !gccgo
+
 package syscall
 
 type Dirent_freebsd11 = dirent_freebsd11
