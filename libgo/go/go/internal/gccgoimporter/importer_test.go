@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -178,6 +179,10 @@ func TestObjImporter(t *testing.T) {
 			t.Fatalf("gccgo %s failed: %s", gofile, err)
 		}
 
+		if test.pkgpath == "issue30628" {
+			// O_TRUNC differs by OS; the .gox in testdata was built on Linux.
+			test.want = strings.Replace(test.want, "[517]", "["+strconv.Itoa(int(os.O_TRUNC)+5)+"]", 1)
+		}
 		runImporterTest(t, imp, initmap, &test)
 
 		cmd = exec.Command("ar", "cr", afile, ofile)

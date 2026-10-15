@@ -131,7 +131,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		}
 
 		// Place process group in foreground.
-		_, err1 = raw_ioctl(sys.Ctty, TIOCSPGRP, int(uintptr(unsafe.Pointer(&pgrp))))
+		_, err1 = raw_ioctl_ptr(sys.Ctty, TIOCSPGRP, unsafe.Pointer(&pgrp))
 		if err1 != 0 {
 			goto childerror
 		}
@@ -190,7 +190,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 
 	// Parent death signal
 	if sys.Pdeathsig != 0 {
-		_, err1 = raw_procctl(_P_PID, 0, _PROC_PDEATHSIG_CTL, unsafe.Pointer(&sys.Pdeathsig))
+		_, err1 = raw_procctl(_P_PID, 0, _PROC_PDEATHSIG_CTL, pdeathsigData(sys))
 
 		if err1 != 0 {
 			goto childerror
@@ -289,4 +289,18 @@ childerror:
 	for {
 		raw_exit(253)
 	}
+}
+
+// pdeathsigData returns the argument for procctl(PROC_PDEATHSIG_CTL),
+// which takes an int *.  Signal is a 64-bit int, so on big-endian
+// systems point at its low-order 32 bits.  This runs in the forked
+// child and must not allocate.
+//
+//go:nosplit
+func pdeathsigData(sys *SysProcAttr) unsafe.Pointer {
+	p := unsafe.Pointer(&sys.Pdeathsig)
+	if isBigEndian {
+		p = unsafe.Add(p, unsafe.Sizeof(sys.Pdeathsig)-unsafe.Sizeof(_C_int(0)))
+	}
+	return p
 }

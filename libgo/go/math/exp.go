@@ -12,7 +12,10 @@ package math
 // Very large values overflow to 0 or +Inf.
 // Very small values underflow to 1.
 func Exp(x float64) float64 {
-	return libc_exp(x)
+	if useLibcExp {
+		return libc_exp(x)
+	}
+	return exp(x)
 }
 
 //extern exp
